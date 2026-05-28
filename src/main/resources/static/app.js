@@ -1,3 +1,14 @@
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import {
+    createUserWithEmailAndPassword,
+    getAuth,
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    signOut
+} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { firebaseConfig, supabaseConfig } from './config.js';
+
 const state = {
     employees: [],
     services: [],
@@ -14,10 +25,16 @@ const money = new Intl.NumberFormat('es-CO', {
 });
 
 const localDbKey = 'tamarindos-db-v1';
+const firebaseEnabled = Boolean(firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId);
+const supabaseEnabled = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
+const supabase = supabaseEnabled ? createClient(supabaseConfig.url, supabaseConfig.anonKey) : null;
+const auth = firebaseEnabled ? getAuth(initializeApp(firebaseConfig)) : null;
 let staticStorageMode = false;
+let currentUser = null;
 
 const api = {
     async get(path) {
+        if (supabaseEnabled) return supabaseApiGet(path);
         if (staticStorageMode) return localApiGet(path);
         try {
             const response = await fetch(path);
@@ -31,6 +48,7 @@ const api = {
         }
     },
     async send(path, method, body) {
+        if (supabaseEnabled) return supabaseApiSend(path, method, body);
         if (staticStorageMode) return localApiSend(path, method, body);
         try {
             const response = await fetch(path, {
@@ -53,6 +71,7 @@ const api = {
 document.addEventListener('DOMContentLoaded', () => {
     bindTabs();
     bindForms();
+    bindAuth();
     setInitialDates();
     document.getElementById('refreshButton').addEventListener('click', loadData);
     document.getElementById('addLineButton').addEventListener('click', () => addInvoiceLine());
@@ -62,8 +81,81 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('reportDate').value = todayIso();
         renderReports();
     });
-    loadData();
+    startSession();
 });
+
+function bindAuth() {
+    document.getElementById('authForm').addEventListener('submit', signInUser);
+    document.getElementById('registerButton').addEventListener('click', registerUser);
+    document.getElementById('logoutButton').addEventListener('click', logoutUser);
+}
+
+function startSession() {
+    if (!firebaseEnabled) {
+        showApp();
+        loadData();
+        return;
+    }
+    showAuth();
+    onAuthStateChanged(auth, user => {
+        currentUser = user;
+        if (user) {
+            showApp(user);
+            loadData();
+        } else {
+            showAuth();
+        }
+    });
+}
+
+async function signInUser(event) {
+    event.preventDefault();
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    try {
+        await signInWithEmailAndPassword(auth, email, password);
+        setAuthMessage('');
+    } catch (error) {
+        setAuthMessage('No se pudo iniciar sesion. Revisa correo y contrasena.');
+    }
+}
+
+async function registerUser() {
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    if (!email || !password) {
+        setAuthMessage('Escribe correo y contrasena para crear el usuario.');
+        return;
+    }
+    try {
+        await createUserWithEmailAndPassword(auth, email, password);
+        setAuthMessage('');
+    } catch (error) {
+        setAuthMessage('No se pudo crear el usuario en Firebase.');
+    }
+}
+
+async function logoutUser() {
+    if (auth) await signOut(auth);
+}
+
+function showAuth() {
+    document.getElementById('authScreen').hidden = false;
+    document.querySelectorAll('.app-view').forEach(element => element.classList.add('hidden'));
+    document.getElementById('logoutButton').hidden = true;
+    document.getElementById('sessionUser').textContent = '';
+}
+
+function showApp(user) {
+    document.getElementById('authScreen').hidden = true;
+    document.querySelectorAll('.app-view').forEach(element => element.classList.remove('hidden'));
+    document.getElementById('logoutButton').hidden = !firebaseEnabled;
+    document.getElementById('sessionUser').textContent = user?.email || (supabaseEnabled ? 'Supabase activo' : 'Modo local');
+}
+
+function setAuthMessage(message) {
+    document.getElementById('authMessage').textContent = message;
+}
 
 function bindTabs() {
     document.querySelectorAll('.tab-button').forEach(button => {
@@ -87,6 +179,255 @@ function setInitialDates() {
     const today = todayIso();
     document.getElementById('reportDate').value = today;
     document.getElementById('loanDate').value = today;
+}
+
+async function supabaseApiGet(path) {
+    if (path === '/api/summary') {
+        const [employees, services, invoices, payouts, loanMovements] = await Promise.all([
+            fetchSupabaseRows('employees', 'id'),
+            fetchSupabaseRows('services', 'id'),
+            fetchSupabaseInvoices(),
+            fetchSupabaseRows('employee_payouts', 'created_at', false),
+            fetchSupabaseRows('loan_movements', 'created_at', false)
+        ]);
+        return {
+            employees: employees.map(fromEmployeeRow),
+            services: services.map(fromServiceRow),
+            invoices,
+            payouts: payouts.map(fromPayoutRow),
+            loanMovements: loanMovements.map(fromLoanMovementRow)
+        };
+    }
+    throw new Error('Ruta de Supabase no soportada.');
+}
+
+async function supabaseApiSend(path, method, body) {
+    if (path.startsWith('/api/employees')) {
+        return supabaseSaveEmployee(path, method, body);
+    }
+    if (path.startsWith('/api/services')) {
+        return supabaseSaveService(path, method, body);
+    }
+    if (path === '/api/invoices' && method === 'POST') {
+        return supabaseSaveInvoice(body);
+    }
+    if (path === '/api/payouts' && method === 'POST') {
+        return supabaseSavePayout(body);
+    }
+    if (path === '/api/loan-movements' && method === 'POST') {
+        return supabaseSaveLoanMovement(body);
+    }
+    throw new Error('Ruta de Supabase no soportada.');
+}
+
+async function fetchSupabaseRows(table, orderColumn, ascending = true) {
+    const { data, error } = await supabase.from(table).select('*').order(orderColumn, { ascending });
+    if (error) throw error;
+    return data || [];
+}
+
+async function fetchSupabaseInvoices() {
+    const { data, error } = await supabase
+        .from('invoices')
+        .select('*, invoice_lines(*)')
+        .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(fromInvoiceRow);
+}
+
+async function supabaseSaveEmployee(path, method, employee) {
+    const id = Number(path.split('/').pop());
+    if (method === 'DELETE') {
+        const { error } = await supabase.from('employees').update({ active: false }).eq('id', id);
+        if (error) throw error;
+        return null;
+    }
+    const row = toEmployeeRow(employee);
+    const query = method === 'PUT'
+        ? supabase.from('employees').update(row).eq('id', id).select().single()
+        : supabase.from('employees').insert(row).select().single();
+    const { data, error } = await query;
+    if (error) throw error;
+    return fromEmployeeRow(data);
+}
+
+async function supabaseSaveService(path, method, service) {
+    const id = Number(path.split('/').pop());
+    if (method === 'DELETE') {
+        const { error } = await supabase.from('services').update({ active: false }).eq('id', id);
+        if (error) throw error;
+        return null;
+    }
+    const row = toServiceRow(service);
+    const query = method === 'PUT'
+        ? supabase.from('services').update(row).eq('id', id).select().single()
+        : supabase.from('services').insert(row).select().single();
+    const { data, error } = await query;
+    if (error) throw error;
+    return fromServiceRow(data);
+}
+
+async function supabaseSaveInvoice(invoice) {
+    const completedLines = invoice.lines.map(line => completeLocalLine({
+        services: state.services,
+        employees: state.employees
+    }, line));
+    const total = completedLines.reduce((sum, line) => sum + line.lineTotal, 0);
+    const totalCommissions = completedLines.reduce((sum, line) => sum + line.employeeEarning, 0);
+    const { data, error } = await supabase
+        .from('invoices')
+        .insert({
+            customer_name: invoice.customerName,
+            vehicle_plate: invoice.vehiclePlate,
+            notes: invoice.notes,
+            total,
+            total_commissions: totalCommissions,
+            business_net: total - totalCommissions
+        })
+        .select()
+        .single();
+    if (error) throw error;
+
+    const { error: linesError } = await supabase.from('invoice_lines').insert(completedLines.map(line => ({
+        invoice_id: data.id,
+        service_id: line.serviceId,
+        service_name: line.serviceName,
+        employee_id: line.employeeId,
+        employee_name: line.employeeName,
+        quantity: line.quantity,
+        unit_price: line.unitPrice,
+        commission_percent: line.commissionPercent,
+        line_total: line.lineTotal,
+        employee_earning: line.employeeEarning
+    })));
+    if (linesError) throw linesError;
+    return { ...fromInvoiceRow(data), lines: completedLines };
+}
+
+async function supabaseSavePayout(payout) {
+    const employee = state.employees.find(item => item.id === payout.employeeId);
+    const { data, error } = await supabase
+        .from('employee_payouts')
+        .insert({
+            employee_id: payout.employeeId,
+            employee_name: employee?.name || '',
+            work_date: payout.workDate,
+            amount: payout.amount,
+            notes: payout.notes
+        })
+        .select()
+        .single();
+    if (error) throw error;
+    return fromPayoutRow(data);
+}
+
+async function supabaseSaveLoanMovement(movement) {
+    const employee = state.employees.find(item => item.id === movement.employeeId);
+    const { data, error } = await supabase
+        .from('loan_movements')
+        .insert({
+            employee_id: movement.employeeId,
+            employee_name: employee?.name || '',
+            movement_date: movement.movementDate,
+            type: movement.type === 'REPAYMENT' ? 'REPAYMENT' : 'LOAN',
+            amount: movement.amount,
+            notes: movement.notes
+        })
+        .select()
+        .single();
+    if (error) throw error;
+    return fromLoanMovementRow(data);
+}
+
+function fromEmployeeRow(row) {
+    return {
+        id: Number(row.id),
+        name: row.name,
+        phone: row.phone || '',
+        defaultCommissionPercent: Number(row.default_commission_percent || 0),
+        active: row.active
+    };
+}
+
+function fromServiceRow(row) {
+    return {
+        id: Number(row.id),
+        name: row.name,
+        category: row.category,
+        price: Number(row.price || 0),
+        active: row.active
+    };
+}
+
+function fromInvoiceRow(row) {
+    return {
+        id: Number(row.id),
+        customerName: row.customer_name,
+        vehiclePlate: row.vehicle_plate || '',
+        notes: row.notes || '',
+        createdAt: row.created_at,
+        total: Number(row.total || 0),
+        totalCommissions: Number(row.total_commissions || 0),
+        businessNet: Number(row.business_net || 0),
+        lines: (row.invoice_lines || []).map(fromInvoiceLineRow)
+    };
+}
+
+function fromInvoiceLineRow(row) {
+    return {
+        serviceId: Number(row.service_id),
+        serviceName: row.service_name,
+        employeeId: Number(row.employee_id),
+        employeeName: row.employee_name,
+        quantity: Number(row.quantity || 1),
+        unitPrice: Number(row.unit_price || 0),
+        commissionPercent: Number(row.commission_percent || 0),
+        lineTotal: Number(row.line_total || 0),
+        employeeEarning: Number(row.employee_earning || 0)
+    };
+}
+
+function fromPayoutRow(row) {
+    return {
+        id: Number(row.id),
+        employeeId: Number(row.employee_id),
+        employeeName: row.employee_name,
+        workDate: row.work_date,
+        amount: Number(row.amount || 0),
+        notes: row.notes || '',
+        createdAt: row.created_at
+    };
+}
+
+function fromLoanMovementRow(row) {
+    return {
+        id: Number(row.id),
+        employeeId: Number(row.employee_id),
+        employeeName: row.employee_name,
+        movementDate: row.movement_date,
+        type: row.type,
+        amount: Number(row.amount || 0),
+        notes: row.notes || '',
+        createdAt: row.created_at
+    };
+}
+
+function toEmployeeRow(employee) {
+    return {
+        name: employee.name,
+        phone: employee.phone,
+        default_commission_percent: employee.defaultCommissionPercent,
+        active: employee.active
+    };
+}
+
+function toServiceRow(service) {
+    return {
+        name: service.name,
+        category: service.category,
+        price: service.price,
+        active: service.active
+    };
 }
 
 function localApiGet(path) {
@@ -723,3 +1064,11 @@ function escapeHtml(value) {
         "'": '&#039;'
     }[character]));
 }
+
+window.editEmployee = editEmployee;
+window.removeEmployee = removeEmployee;
+window.editService = editService;
+window.removeService = removeService;
+window.setLine = setLine;
+window.removeLine = removeLine;
+window.payEmployeeDay = payEmployeeDay;

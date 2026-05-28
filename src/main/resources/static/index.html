@@ -7,7 +7,30 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <aside class="sidebar">
+    <section class="auth-screen" id="authScreen" hidden>
+        <form class="auth-card" id="authForm">
+            <div class="brand auth-brand">
+                <span class="brand-mark">LT</span>
+                <div>
+                    <strong>Los Tamarindos</strong>
+                    <small>Acceso del negocio</small>
+                </div>
+            </div>
+            <label>
+                Correo
+                <input id="authEmail" type="email" autocomplete="email" required>
+            </label>
+            <label>
+                Contrasena
+                <input id="authPassword" type="password" autocomplete="current-password" required>
+            </label>
+            <button class="primary-button" type="submit">Entrar</button>
+            <button class="ghost-button" id="registerButton" type="button">Crear usuario</button>
+            <p id="authMessage"></p>
+        </form>
+    </section>
+
+    <aside class="sidebar app-view">
         <div class="brand">
             <span class="brand-mark">LT</span>
             <div>
@@ -23,13 +46,17 @@
         </nav>
     </aside>
 
-    <main class="app-shell">
+    <main class="app-shell app-view">
         <header class="topbar">
             <div>
                 <h1>Gestion diaria</h1>
                 <p>Ventas, servicios realizados y ganancias del equipo en un solo lugar.</p>
             </div>
-            <button class="ghost-button" id="refreshButton" type="button">Actualizar</button>
+            <div class="session-actions">
+                <span id="sessionUser"></span>
+                <button class="ghost-button" id="refreshButton" type="button">Actualizar</button>
+                <button class="ghost-button" id="logoutButton" type="button" hidden>Salir</button>
+            </div>
         </header>
 
         <section class="stats-grid" aria-label="Resumen">
@@ -195,6 +222,6 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>
