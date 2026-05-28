@@ -9,3 +9,11 @@ export const supabaseConfig = {
     url: 'https://oevlrwgzevajuhfnfhyl.supabase.co',
     anonKey: 'sb_publishable_ZVZHqx7SzvpCMM7TrBpTCw_osMT5YMy'
 };
+
+export const authSettings = {
+    allowRegistration: true,
+    requireEmailVerification: true,
+    minPasswordLength: 12,
+    allowedEmailDomain: '',
+    allowedEmails: []
+};

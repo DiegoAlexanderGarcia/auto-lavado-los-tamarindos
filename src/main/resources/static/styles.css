@@ -78,6 +78,15 @@ select {
     font-size: 13px;
 }
 
+.register-fields {
+    display: grid;
+    gap: 10px;
+}
+
+.password-help {
+    margin: -4px 0 0;
+}
+
 .app-view.hidden {
     display: none;
 }

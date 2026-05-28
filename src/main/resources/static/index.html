@@ -24,8 +24,16 @@
                 Contrasena
                 <input id="authPassword" type="password" autocomplete="current-password" required>
             </label>
+            <div class="register-fields" id="registerFields" hidden>
+                <label>
+                    Confirmar contrasena
+                    <input id="authPasswordConfirm" type="password" autocomplete="new-password">
+                </label>
+                <p class="password-help">Usa minimo 12 caracteres con mayuscula, minuscula, numero y simbolo.</p>
+            </div>
             <button class="primary-button" type="submit">Entrar</button>
             <button class="ghost-button" id="registerButton" type="button">Crear usuario</button>
+            <button class="ghost-button" id="cancelRegisterButton" type="button" hidden>Volver al ingreso</button>
             <p id="authMessage"></p>
         </form>
     </section>

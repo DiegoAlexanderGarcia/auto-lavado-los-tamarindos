@@ -33,6 +33,20 @@ El archivo `netlify.toml` publica la carpeta `src/main/resources/static`, que es
 
 Cuando `config.js` tiene Firebase configurado, la app pide login. Cuando tambien tiene Supabase configurado, los datos se guardan en Supabase.
 
+### Registro de usuarios
+
+La app permite crear usuarios desde la pantalla de login si `authSettings.allowRegistration` esta en `true`.
+
+Recomendado:
+
+1. Deja `allowRegistration: true` solo mientras creas tu primer usuario.
+2. Usa una contrasena fuerte: minimo 12 caracteres con mayuscula, minuscula, numero y simbolo.
+3. Verifica el correo desde el enlace que envia Firebase.
+4. Cambia `allowRegistration` a `false` y vuelve a publicar.
+5. En Firebase Authentication agrega tu dominio de Netlify en `Settings > Authorized domains`.
+
+Para limitar quienes pueden entrar, puedes llenar `allowedEmails` con los correos permitidos o `allowedEmailDomain` con un dominio propio.
+
 ## Que incluye
 
 - Registro y edicion de empleados con porcentaje de ganancia.

@@ -3,11 +3,12 @@ import {
     createUserWithEmailAndPassword,
     getAuth,
     onAuthStateChanged,
+    sendEmailVerification,
     signInWithEmailAndPassword,
     signOut
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { firebaseConfig, supabaseConfig } from './config.js';
+import { authSettings, firebaseConfig, supabaseConfig } from './config.js';
 
 const state = {
     employees: [],
@@ -31,6 +32,7 @@ const supabase = supabaseEnabled ? createClient(supabaseConfig.url, supabaseConf
 const auth = firebaseEnabled ? getAuth(initializeApp(firebaseConfig)) : null;
 let staticStorageMode = false;
 let currentUser = null;
+let registerMode = false;
 
 const api = {
     async get(path) {
@@ -86,7 +88,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function bindAuth() {
     document.getElementById('authForm').addEventListener('submit', signInUser);
-    document.getElementById('registerButton').addEventListener('click', registerUser);
+    document.getElementById('registerButton').addEventListener('click', startRegisterMode);
+    document.getElementById('cancelRegisterButton').addEventListener('click', stopRegisterMode);
     document.getElementById('logoutButton').addEventListener('click', logoutUser);
 }
 
@@ -100,6 +103,17 @@ function startSession() {
     onAuthStateChanged(auth, user => {
         currentUser = user;
         if (user) {
+            if (!userAllowed(user)) {
+                signOut(auth);
+                setAuthMessage('Este correo no esta autorizado para entrar.');
+                return;
+            }
+            if (authSettings.requireEmailVerification && !user.emailVerified) {
+                sendEmailVerification(user).catch(() => {});
+                signOut(auth);
+                setAuthMessage('Verifica tu correo antes de entrar. Te enviamos un enlace.');
+                return;
+            }
             showApp(user);
             loadData();
         } else {
@@ -110,6 +124,10 @@ function startSession() {
 
 async function signInUser(event) {
     event.preventDefault();
+    if (registerMode) {
+        await registerUser();
+        return;
+    }
     const email = document.getElementById('authEmail').value.trim();
     const password = document.getElementById('authPassword').value;
     try {
@@ -120,18 +138,64 @@ async function signInUser(event) {
     }
 }
 
+function startRegisterMode() {
+    if (!authSettings.allowRegistration) {
+        setAuthMessage('El registro esta cerrado. Crea usuarios desde Firebase.');
+        return;
+    }
+    registerMode = true;
+    document.getElementById('registerFields').hidden = false;
+    document.getElementById('cancelRegisterButton').hidden = false;
+    document.getElementById('registerButton').hidden = true;
+    document.querySelector('#authForm .primary-button').textContent = 'Crear usuario';
+    document.getElementById('authPassword').autocomplete = 'new-password';
+    setAuthMessage('Crea tu usuario con una contrasena fuerte.');
+}
+
+function stopRegisterMode() {
+    registerMode = false;
+    document.getElementById('registerFields').hidden = true;
+    document.getElementById('cancelRegisterButton').hidden = true;
+    document.getElementById('registerButton').hidden = false;
+    document.querySelector('#authForm .primary-button').textContent = 'Entrar';
+    document.getElementById('authPassword').autocomplete = 'current-password';
+    document.getElementById('authPasswordConfirm').value = '';
+    setAuthMessage('');
+}
+
 async function registerUser() {
+    if (!authSettings.allowRegistration) {
+        setAuthMessage('El registro esta cerrado. Crea usuarios desde Firebase.');
+        return;
+    }
     const email = document.getElementById('authEmail').value.trim();
     const password = document.getElementById('authPassword').value;
+    const passwordConfirm = document.getElementById('authPasswordConfirm').value;
     if (!email || !password) {
         setAuthMessage('Escribe correo y contrasena para crear el usuario.');
         return;
     }
+    if (!emailAllowed(email)) {
+        setAuthMessage('Este correo no esta autorizado para registrarse.');
+        return;
+    }
+    const passwordError = validatePassword(password, passwordConfirm);
+    if (passwordError) {
+        setAuthMessage(passwordError);
+        return;
+    }
     try {
-        await createUserWithEmailAndPassword(auth, email, password);
-        setAuthMessage('');
+        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        if (authSettings.requireEmailVerification) {
+            await sendEmailVerification(credential.user);
+            await signOut(auth);
+            stopRegisterMode();
+            setAuthMessage('Usuario creado. Revisa tu correo y verifica la cuenta antes de entrar.');
+            return;
+        }
+        setAuthMessage('Usuario creado correctamente.');
     } catch (error) {
-        setAuthMessage('No se pudo crear el usuario en Firebase.');
+        setAuthMessage(firebaseErrorMessage(error));
     }
 }
 
@@ -155,6 +219,46 @@ function showApp(user) {
 
 function setAuthMessage(message) {
     document.getElementById('authMessage').textContent = message;
+}
+
+function userAllowed(user) {
+    return emailAllowed(user.email || '');
+}
+
+function emailAllowed(email) {
+    const normalized = email.toLowerCase();
+    const allowedEmails = (authSettings.allowedEmails || []).map(item => item.toLowerCase());
+    if (allowedEmails.length && !allowedEmails.includes(normalized)) {
+        return false;
+    }
+    if (authSettings.allowedEmailDomain && !normalized.endsWith(`@${authSettings.allowedEmailDomain.toLowerCase()}`)) {
+        return false;
+    }
+    return true;
+}
+
+function validatePassword(password, passwordConfirm) {
+    if (password !== passwordConfirm) {
+        return 'Las contrasenas no coinciden.';
+    }
+    const minLength = authSettings.minPasswordLength || 12;
+    if (password.length < minLength) {
+        return `La contrasena debe tener minimo ${minLength} caracteres.`;
+    }
+    if (!/[a-z]/.test(password)) return 'Agrega al menos una letra minuscula.';
+    if (!/[A-Z]/.test(password)) return 'Agrega al menos una letra mayuscula.';
+    if (!/[0-9]/.test(password)) return 'Agrega al menos un numero.';
+    if (!/[^A-Za-z0-9]/.test(password)) return 'Agrega al menos un simbolo.';
+    return '';
+}
+
+function firebaseErrorMessage(error) {
+    if (error.code === 'auth/email-already-in-use') return 'Ese correo ya esta registrado.';
+    if (error.code === 'auth/operation-not-allowed') return 'Activa Email/Password en Firebase Authentication.';
+    if (error.code === 'auth/invalid-email') return 'El correo no es valido.';
+    if (error.code === 'auth/weak-password') return 'Firebase rechazo la contrasena por debil.';
+    if (error.code === 'auth/unauthorized-domain') return 'Agrega tu dominio de Netlify en Firebase Authentication.';
+    return 'No se pudo crear el usuario en Firebase.';
 }
 
 function bindTabs() {
