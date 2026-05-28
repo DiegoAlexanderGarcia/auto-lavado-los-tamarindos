@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Lavado Los Tamarindos</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand-mark">LT</span>
+            <div>
+                <strong>Los Tamarindos</strong>
+                <small>Facturacion y comisiones</small>
+            </div>
+        </div>
+        <nav class="nav-tabs" aria-label="Secciones">
+            <button class="tab-button active" data-tab="billing" title="Facturar">Facturar</button>
+            <button class="tab-button" data-tab="employees" title="Empleados">Empleados</button>
+            <button class="tab-button" data-tab="services" title="Servicios">Servicios</button>
+            <button class="tab-button" data-tab="reports" title="Reportes">Reportes</button>
+        </nav>
+    </aside>
+
+    <main class="app-shell">
+        <header class="topbar">
+            <div>
+                <h1>Gestion diaria</h1>
+                <p>Ventas, servicios realizados y ganancias del equipo en un solo lugar.</p>
+            </div>
+            <button class="ghost-button" id="refreshButton" type="button">Actualizar</button>
+        </header>
+
+        <section class="stats-grid" aria-label="Resumen">
+            <article class="metric">
+                <span>Ventas totales</span>
+                <strong id="totalSales">$0</strong>
+            </article>
+            <article class="metric">
+                <span>Comisiones</span>
+                <strong id="totalCommissions">$0</strong>
+            </article>
+            <article class="metric">
+                <span>Neto negocio</span>
+                <strong id="businessNet">$0</strong>
+            </article>
+            <article class="metric">
+                <span>Facturas</span>
+                <strong id="invoiceCount">0</strong>
+            </article>
+        </section>
+
+        <section class="tab-panel active" id="billing">
+            <div class="section-head">
+                <div>
+                    <h2>Nueva factura</h2>
+                    <p>Registra cliente, vehiculo, servicio y empleado responsable.</p>
+                </div>
+                <button class="primary-button" id="addLineButton" type="button">Agregar servicio</button>
+            </div>
+
+            <form class="workspace" id="invoiceForm">
+                <div class="form-grid">
+                    <label>
+                        Cliente
+                        <input id="customerName" name="customerName" placeholder="Nombre del cliente">
+                    </label>
+                    <label>
+                        Placa / vehiculo
+                        <input id="vehiclePlate" name="vehiclePlate" placeholder="ABC123">
+                    </label>
+                    <label class="wide">
+                        Notas
+                        <input id="invoiceNotes" name="notes" placeholder="Observaciones del servicio">
+                    </label>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Servicio</th>
+                            <th>Empleado</th>
+                            <th>Cant.</th>
+                            <th>Precio</th>
+                            <th>% empleado</th>
+                            <th>Total</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody id="invoiceLines"></tbody>
+                    </table>
+                </div>
+
+                <div class="invoice-footer">
+                    <div class="invoice-totals">
+                        <span>Total factura: <strong id="draftTotal">$0</strong></span>
+                        <span>Ganancia empleados: <strong id="draftCommission">$0</strong></span>
+                    </div>
+                    <button class="primary-button" type="submit">Guardar factura</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="tab-panel" id="employees">
+            <div class="section-head">
+                <div>
+                    <h2>Empleados</h2>
+                    <p>Configura el porcentaje normal que gana cada empleado.</p>
+                </div>
+            </div>
+            <form class="inline-form" id="employeeForm">
+                <input type="hidden" id="employeeId">
+                <input id="employeeName" placeholder="Nombre del empleado" required>
+                <input id="employeePhone" placeholder="Telefono">
+                <input id="employeeCommission" type="number" min="0" max="100" step="0.1" placeholder="% ganancia" required>
+                <button class="primary-button" type="submit">Guardar</button>
+            </form>
+            <div class="list-grid" id="employeeList"></div>
+        </section>
+
+        <section class="tab-panel" id="services">
+            <div class="section-head">
+                <div>
+                    <h2>Servicios</h2>
+                    <p>Define precios para autolavado, monta llantas y mecanica.</p>
+                </div>
+            </div>
+            <form class="inline-form" id="serviceForm">
+                <input type="hidden" id="serviceId">
+                <input id="serviceName" placeholder="Nombre del servicio" required>
+                <select id="serviceCategory" required>
+                    <option>Autolavado</option>
+                    <option>Monta llantas</option>
+                    <option>Mecanica</option>
+                    <option>Otros</option>
+                </select>
+                <input id="servicePrice" type="number" min="0" step="100" placeholder="Precio" required>
+                <button class="primary-button" type="submit">Guardar</button>
+            </form>
+            <div class="list-grid" id="serviceList"></div>
+        </section>
+
+        <section class="tab-panel" id="reports">
+            <div class="section-head">
+                <div>
+                    <h2>Reportes</h2>
+                    <p>Revisa por dia, semana o mes lo vendido, lo ganado, pagos y prestamos.</p>
+                </div>
+            </div>
+            <div class="report-filters">
+                <label>
+                    Periodo
+                    <select id="reportPeriod">
+                        <option value="day">Dia</option>
+                        <option value="week">Semana</option>
+                        <option value="month">Mes</option>
+                    </select>
+                </label>
+                <label>
+                    Fecha
+                    <input id="reportDate" type="date">
+                </label>
+                <button class="ghost-button" id="todayButton" type="button">Hoy</button>
+            </div>
+            <div class="report-layout">
+                <div>
+                    <h3>Nomina del periodo</h3>
+                    <div class="list-grid compact" id="payrollList"></div>
+                </div>
+                <div>
+                    <h3>Prestamos y abonos</h3>
+                    <form class="money-form" id="loanForm">
+                        <select id="loanEmployee" required></select>
+                        <select id="loanType" required>
+                            <option value="LOAN">Prestamo</option>
+                            <option value="REPAYMENT">Abono</option>
+                        </select>
+                        <input id="loanAmount" type="number" min="0" step="100" placeholder="Valor" required>
+                        <input id="loanDate" type="date" required>
+                        <input id="loanNotes" placeholder="Nota">
+                        <button class="primary-button" type="submit">Registrar</button>
+                    </form>
+                    <div class="list-grid compact" id="loanList"></div>
+                </div>
+            </div>
+            <div class="report-layout single">
+                <div>
+                    <h3>Facturas del periodo</h3>
+                    <div class="invoice-history" id="invoiceHistory"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+</body>
+</html>
