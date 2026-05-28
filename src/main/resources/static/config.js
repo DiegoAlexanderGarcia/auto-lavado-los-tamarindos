@@ -11,7 +11,7 @@ export const supabaseConfig = {
 };
 
 export const authSettings = {
-    allowRegistration: false,
+    allowRegistration: true,
     requireEmailVerification: true,
     minPasswordLength: 12,
     allowedEmailDomain: '',
