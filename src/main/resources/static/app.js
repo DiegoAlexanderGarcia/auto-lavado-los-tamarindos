@@ -13,21 +13,40 @@ const money = new Intl.NumberFormat('es-CO', {
     maximumFractionDigits: 0
 });
 
+const localDbKey = 'tamarindos-db-v1';
+let staticStorageMode = false;
+
 const api = {
     async get(path) {
-        const response = await fetch(path);
-        if (!response.ok) throw new Error('No se pudo cargar la informacion.');
-        return response.json();
+        if (staticStorageMode) return localApiGet(path);
+        try {
+            const response = await fetch(path);
+            if (!response.ok) throw new Error('No se pudo cargar la informacion.');
+            return response.json();
+        } catch (error) {
+            if (!path.startsWith('/api/')) throw error;
+            staticStorageMode = true;
+            toast('Modo Netlify: datos guardados en este navegador.');
+            return localApiGet(path);
+        }
     },
     async send(path, method, body) {
-        const response = await fetch(path, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        if (!response.ok) throw new Error('No se pudo guardar la informacion.');
-        if (response.status === 204) return null;
-        return response.json();
+        if (staticStorageMode) return localApiSend(path, method, body);
+        try {
+            const response = await fetch(path, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!response.ok) throw new Error('No se pudo guardar la informacion.');
+            if (response.status === 204) return null;
+            return response.json();
+        } catch (error) {
+            if (!path.startsWith('/api/')) throw error;
+            staticStorageMode = true;
+            toast('Modo Netlify: datos guardados en este navegador.');
+            return localApiSend(path, method, body);
+        }
     }
 };
 
@@ -68,6 +87,168 @@ function setInitialDates() {
     const today = todayIso();
     document.getElementById('reportDate').value = today;
     document.getElementById('loanDate').value = today;
+}
+
+function localApiGet(path) {
+    const db = readLocalDb();
+    if (path === '/api/summary') return db;
+    if (path === '/api/employees') return db.employees;
+    if (path === '/api/services') return db.services;
+    if (path === '/api/invoices') return db.invoices;
+    if (path === '/api/payouts') return db.payouts;
+    if (path === '/api/loan-movements') return db.loanMovements;
+    throw new Error('Ruta local no soportada.');
+}
+
+function localApiSend(path, method, body) {
+    const db = readLocalDb();
+    const id = Number(path.split('/').pop());
+    let result = null;
+
+    if (path.startsWith('/api/employees')) {
+        result = saveLocalEmployee(db, method, id, body);
+    } else if (path.startsWith('/api/services')) {
+        result = saveLocalService(db, method, id, body);
+    } else if (path === '/api/invoices' && method === 'POST') {
+        result = saveLocalInvoice(db, body);
+    } else if (path === '/api/payouts' && method === 'POST') {
+        result = saveLocalPayout(db, body);
+    } else if (path === '/api/loan-movements' && method === 'POST') {
+        result = saveLocalLoanMovement(db, body);
+    } else {
+        throw new Error('Ruta local no soportada.');
+    }
+
+    writeLocalDb(db);
+    return result;
+}
+
+function saveLocalEmployee(db, method, id, employee) {
+    if (method === 'DELETE') {
+        const current = db.employees.find(item => item.id === id);
+        if (current) current.active = false;
+        return null;
+    }
+    if (method === 'PUT') {
+        const current = db.employees.find(item => item.id === id);
+        Object.assign(current, employee, { id });
+        return current;
+    }
+    const created = { ...employee, id: db.nextEmployeeId++ };
+    db.employees.push(created);
+    return created;
+}
+
+function saveLocalService(db, method, id, service) {
+    if (method === 'DELETE') {
+        const current = db.services.find(item => item.id === id);
+        if (current) current.active = false;
+        return null;
+    }
+    if (method === 'PUT') {
+        const current = db.services.find(item => item.id === id);
+        Object.assign(current, service, { id });
+        return current;
+    }
+    const created = { ...service, id: db.nextServiceId++ };
+    db.services.push(created);
+    return created;
+}
+
+function saveLocalInvoice(db, invoice) {
+    const created = {
+        ...invoice,
+        id: db.nextInvoiceId++,
+        createdAt: new Date().toISOString(),
+        lines: invoice.lines.map(line => completeLocalLine(db, line))
+    };
+    created.total = created.lines.reduce((sum, line) => sum + line.lineTotal, 0);
+    created.totalCommissions = created.lines.reduce((sum, line) => sum + line.employeeEarning, 0);
+    created.businessNet = created.total - created.totalCommissions;
+    db.invoices.push(created);
+    return created;
+}
+
+function saveLocalPayout(db, payout) {
+    const employee = db.employees.find(item => item.id === payout.employeeId);
+    const created = {
+        ...payout,
+        id: db.nextPayoutId++,
+        employeeName: employee?.name || '',
+        createdAt: new Date().toISOString()
+    };
+    db.payouts.push(created);
+    return created;
+}
+
+function saveLocalLoanMovement(db, movement) {
+    const employee = db.employees.find(item => item.id === movement.employeeId);
+    const created = {
+        ...movement,
+        id: db.nextLoanMovementId++,
+        type: movement.type === 'REPAYMENT' ? 'REPAYMENT' : 'LOAN',
+        employeeName: employee?.name || '',
+        createdAt: new Date().toISOString()
+    };
+    db.loanMovements.push(created);
+    return created;
+}
+
+function completeLocalLine(db, line) {
+    const service = db.services.find(item => item.id === line.serviceId);
+    const employee = db.employees.find(item => item.id === line.employeeId);
+    const quantity = Number(line.quantity) > 0 ? Number(line.quantity) : 1;
+    const unitPrice = Number(line.unitPrice) > 0 ? Number(line.unitPrice) : Number(service?.price || 0);
+    const commissionPercent = Number(line.commissionPercent) >= 0 ? Number(line.commissionPercent) : Number(employee?.defaultCommissionPercent || 0);
+    const lineTotal = quantity * unitPrice;
+    return {
+        ...line,
+        serviceName: service?.name || '',
+        employeeName: employee?.name || '',
+        quantity,
+        unitPrice,
+        commissionPercent,
+        lineTotal,
+        employeeEarning: lineTotal * (commissionPercent / 100)
+    };
+}
+
+function readLocalDb() {
+    const stored = localStorage.getItem(localDbKey);
+    if (stored) return normalizeLocalDb(JSON.parse(stored));
+    const db = normalizeLocalDb({});
+    writeLocalDb(db);
+    return db;
+}
+
+function writeLocalDb(db) {
+    localStorage.setItem(localDbKey, JSON.stringify(db));
+}
+
+function normalizeLocalDb(db) {
+    db.employees ||= [];
+    db.services ||= defaultServices();
+    db.invoices ||= [];
+    db.payouts ||= [];
+    db.loanMovements ||= [];
+    db.nextEmployeeId ||= nextId(db.employees);
+    db.nextServiceId ||= nextId(db.services);
+    db.nextInvoiceId ||= nextId(db.invoices);
+    db.nextPayoutId ||= nextId(db.payouts);
+    db.nextLoanMovementId ||= nextId(db.loanMovements);
+    return db;
+}
+
+function defaultServices() {
+    return [
+        { id: 1, name: 'Lavado general', category: 'Autolavado', price: 25000, active: true },
+        { id: 2, name: 'Monta llanta', category: 'Monta llantas', price: 12000, active: true },
+        { id: 3, name: 'Revision mecanica', category: 'Mecanica', price: 40000, active: true }
+    ];
+}
+
+function nextId(items) {
+    return items.reduce((max, item) => Math.max(max, Number(item.id || 0)), 0) + 1;
 }
 
 async function loadData() {
