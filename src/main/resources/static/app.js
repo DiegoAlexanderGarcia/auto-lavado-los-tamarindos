@@ -3,7 +3,6 @@ import {
     createUserWithEmailAndPassword,
     getAuth,
     onAuthStateChanged,
-    sendEmailVerification,
     signInWithEmailAndPassword,
     signOut
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
@@ -108,12 +107,6 @@ function startSession() {
                 setAuthMessage('Este correo no esta autorizado para entrar.');
                 return;
             }
-            if (authSettings.requireEmailVerification && !user.emailVerified) {
-                sendEmailVerification(user).catch(() => {});
-                signOut(auth);
-                setAuthMessage('Verifica tu correo antes de entrar. Te enviamos un enlace.');
-                return;
-            }
             showApp(user);
             loadData();
         } else {
@@ -186,13 +179,9 @@ async function registerUser() {
     }
     try {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
-        if (authSettings.requireEmailVerification) {
-            await sendEmailVerification(credential.user);
-            await signOut(auth);
-            stopRegisterMode();
-            setAuthMessage('Usuario creado. Revisa tu correo y verifica la cuenta antes de entrar.');
-            return;
-        }
+        await signOut(auth);
+        stopRegisterMode();
+        setAuthMessage('Usuario creado. Ya puedes iniciar sesion con ese correo.');
         setAuthMessage('Usuario creado correctamente.');
     } catch (error) {
         setAuthMessage(firebaseErrorMessage(error));
@@ -258,7 +247,7 @@ function firebaseErrorMessage(error) {
     if (error.code === 'auth/invalid-email') return 'El correo no es valido.';
     if (error.code === 'auth/weak-password') return 'Firebase rechazo la contrasena por debil.';
     if (error.code === 'auth/unauthorized-domain') return 'Agrega tu dominio de Netlify en Firebase Authentication.';
-    return 'No se pudo crear el usuario en Firebase.';
+    return `${error.code || 'auth/error'}: ${error.message || 'No se pudo crear el usuario en Firebase.'}`;
 }
 
 function bindTabs() {
